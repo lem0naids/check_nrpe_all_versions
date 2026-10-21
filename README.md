@@ -55,13 +55,25 @@ avec `docker compose exec nrpe-client …`.
 Mêmes arguments que `check_nrpe` (`-H`, `-c`, `-a`, `-p`…), transmis à
 l'identique, mais il essaie tous les modes du plus récent au plus ancien
 (v4 → v3 → v2, avec/sans SSL, avec/sans ADH) et renvoie le résultat du **premier
-qui se connecte**. Une seule commande, utilisable directement comme check
-Nagios, quel que soit l'agent :
+qui se connecte**.
+
+**Sans `-c` : simple test de joignabilité.** La commande se contente de
+contacter l'agent et de renvoyer sa version — pratique pour vérifier qu'on
+l'atteint et savoir ce qu'il parle, sans exécuter de check :
+
+```sh
+docker compose exec nrpe-client check_nrpe_auto -H <hote>
+# -> NRPE v4.1.3   (code 0 si joignable)
+```
+
+**Avec `-c <commande>` : exécution d'un check** sur l'agent :
 
 ```sh
 docker compose exec nrpe-client \
     check_nrpe_auto -H <hote> -c check_ping -a 127.0.0.1
 ```
+
+Dans les deux cas :
 
 - s'arrête au premier mode qui répond (rapide sur un agent joignable) ;
 - si aucun ne se connecte → `CHECK_NRPE_AUTO: aucun mode…` en CRITICAL (code 2).
