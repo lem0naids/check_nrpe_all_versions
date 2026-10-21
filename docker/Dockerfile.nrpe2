@@ -1,0 +1,65 @@
+# NRPE 2.15 : dernier de la serie 2.x. Cible de test "vieil agent" pour
+# valider le repli v2 du client. Meme base OpenSSL 1.0.2 que le reste.
+#
+# La 2.15 embarque un include/dh.h statique (get_dh512) : pas de generation
+# de parametres DH au build, donc ni openssl binaire ni patch de taille.
+# Le protocole est v2 uniquement (pas de v3/v4).
+FROM ubuntu:16.04
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential libssl-dev \
+        nagios-plugins-basic nagios-plugins-standard \
+        iputils-ping procps socat \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r nagios && useradd -r -g nagios -d /usr/local/nagios -s /bin/false nagios
+
+COPY nrpe215 /usr/src/nrpe215
+WORKDIR /usr/src/nrpe215
+
+# --enable-command-args : accepte les arguments client ($ARG1$), pour check_ping.
+# NASTY_METACHARS est une constante compilee en 2.x : pas d'assouplissement
+# possible sans patch, le filtre reste donc actif.
+# config.h inclut deja <dh.h> (celui d'OpenSSL) : le preproc memorise ce chemin
+# et, par l'optimisation "once-only", saute include/dh.h de NRPE au second
+# include -> get_dh512() n'est jamais compile (undefined reference au link).
+# Parade : un header au nom unique que le preproc n'a jamais vu.
+RUN { printf '#include <openssl/dh.h>\n'; sed -n '4,$p' include/dh.h; } > include/nrpe_dh.h \
+ && sed -i 's#"../include/dh.h"#"../include/nrpe_dh.h"#' src/nrpe.c \
+ && grep -q 'nrpe_dh.h' src/nrpe.c
+
+# NASTY_METACHARS est une constante compilee en 2.x (pas de directive de conf).
+# On la vide pour laisser passer les metacaracteres shell, comme la cible 4.x :
+# strcspn(req,"") renvoie toute la longueur, donc "aucun nasty trouve".
+# Cible de test permissive, JAMAIS a exposer.
+RUN sed -i 's|#define NASTY_METACHARS .*|#define NASTY_METACHARS ""|' src/nrpe.c \
+ && grep -q '#define NASTY_METACHARS ""' src/nrpe.c
+
+RUN ./configure \
+        --enable-ssl \
+        --enable-command-args \
+        --with-ssl-lib=/usr/lib/x86_64-linux-gnu \
+        --with-ssl-inc=/usr/include/openssl \
+        --with-nrpe-user=nagios \
+        --with-nrpe-group=nagios \
+        --with-nagios-user=nagios \
+        --with-nagios-group=nagios \
+ && make all \
+ && make install \
+ && install -d -o nagios -g nagios -m 755 /usr/local/nagios/var \
+ && ldd /usr/local/nagios/bin/nrpe | grep -F libssl.so.1.0 \
+ && /usr/local/nagios/bin/nrpe --version 2>&1 | head -3 || true
+
+# NRPE 2.15 en mode inetd refuse de tourner en root (check_privileges()).
+# socat execute donc nrpe sous l'utilisateur nagios ; le port 5666 n'est pas
+# privilegie, un non-root peut s'y lier. /usr/local/nagios/var lui appartient.
+USER nagios
+
+EXPOSE 5666
+# Le mode daemon (-d) de la 2.15 fork et detache : en conteneur, PID 1 quitte.
+# On lance donc nrpe en mode inetd (-i, un process par connexion) derriere
+# socat, qui reste au premier plan comme PID 1 et relaie le socket TCP sur
+# stdin/stdout. nrpe gere lui-meme le SSL sur ce socket.
+CMD ["socat", "TCP-LISTEN:5666,reuseaddr,fork", \
+     "EXEC:/usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -i,nofork"]

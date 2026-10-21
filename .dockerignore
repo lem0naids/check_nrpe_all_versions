@@ -1,0 +1,5 @@
+# L'historique git et les docs des sources n'ont rien a faire dans le contexte.
+nrpe/.git
+nrpe/docs
+nrpe215/.git
+nrpe215/docs

@@ -1,0 +1,66 @@
+services:
+  nrpe-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        # 512 pour parler a de vieux agents. Mettre 2048 pour une conf saine.
+        DH_BITS: "512"
+        # 1 = le demon accepte les arguments client ($ARG1$). Combine a
+        # dont_blame_nrpe=1 et nasty_metachars=\a dans docker/conf/nrpe.cfg,
+        # la cible de test est volontairement permissive. RISQUE DE SECURITE :
+        # ne jamais exposer cette image. Mettre 0 pour un demon verrouille.
+        ENABLE_ARGS: "1"
+    image: nrpe-ssl10:4.1.3
+    # Profil "servers" : cette cible de test ne demarre PAS avec un simple
+    # "docker compose up" (qui ne lance que le client). Il faut la demander :
+    #   docker compose --profile servers up -d
+    profiles: ["servers"]
+    volumes:
+      - ./docker/conf/nrpe.cfg:/usr/local/nagios/etc/nrpe.cfg:ro
+    ports:
+      # Surchargeable : NRPE_PORT=5667 docker compose --profile servers up -d
+      - "127.0.0.1:${NRPE_PORT:-5666}:5666"
+    networks:
+      - nrpe
+
+  nrpe-client:
+    # Meme Dockerfile que le serveur : sans cette section, un
+    # "docker compose build nrpe-client" ne reconstruirait rien.
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        # Doit correspondre a nrpe-server : meme tag d'image.
+        DH_BITS: "512"
+        ENABLE_ARGS: "1"
+    image: nrpe-ssl10:4.1.3
+    # Pas de profil : le client est le seul service lance par "docker compose
+    # up". Pas de depends_on sur les serveurs (ils sont dans un profil a part ;
+    # le client sert aussi a interroger des agents distants, sans eux).
+    # Meme image : check_nrpe y est deja compile contre OpenSSL 1.0.2.
+    # "command" et non "entrypoint" : ainsi un "docker compose run" peut le
+    # remplacer et transmettre ses arguments au binaire. Avec un entrypoint,
+    # les arguments seraient passes a sleep.
+    command: ["sleep", "infinity"]
+    networks:
+      - nrpe
+
+  # Cible "vieil agent" : NRPE 2.15 (protocole v2 uniquement, ADH, DH 512
+  # statique). Sert a valider le repli v2 du client contre un vrai agent 2.x.
+  nrpe-server-v2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nrpe2
+    image: nrpe215:2.15
+    profiles: ["servers"]
+    volumes:
+      - ./docker/conf/nrpe2.cfg:/usr/local/nagios/etc/nrpe.cfg:ro
+    ports:
+      # Port hote distinct du 4.x. Surchargeable : NRPE2_PORT=5669 ...
+      - "127.0.0.1:${NRPE2_PORT:-5668}:5666"
+    networks:
+      - nrpe
+
+networks:
+  nrpe:
