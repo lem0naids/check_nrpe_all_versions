@@ -1,6 +1,6 @@
 # check_nrpe – compatible toutes versions
 
-Un client **`check_nrpe` universel**, packagé en conteneur, capable d'interroger
+Un client **`check_nrpe`**, packagé en conteneur, capable d'interroger
 n'importe quel agent NRPE (de la vieille branche 2.x jusqu'aux 4.x récentes),
 là où un `check_nrpe` moderne échoue sur les agents anciens (ADH, DH 512,
 paquets v2…).
